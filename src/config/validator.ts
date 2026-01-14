@@ -1,4 +1,4 @@
-import { RootConfig } from "../types/workflow";
+import { RootConfig } from "./schema";
 
 export function validateSemantics(config: RootConfig) {
   const agentIds = new Set<string>();

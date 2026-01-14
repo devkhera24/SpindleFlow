@@ -1,5 +1,6 @@
 import { Agent } from "./agent";
-import { RootConfig } from "../types/workflow";
+import { RootConfig } from "../config/schema";
+
 
 export class AgentRegistry {
   private agents = new Map<string, Agent>();

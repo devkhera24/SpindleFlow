@@ -33,3 +33,5 @@ export const RootConfigSchema = z.object({
   agents: z.array(AgentSchema).min(1),
   workflow: WorkflowSchema,
 });
+
+export type RootConfig = z.infer<typeof RootConfigSchema>;
