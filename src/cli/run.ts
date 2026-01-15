@@ -21,6 +21,7 @@ import {
   buildExecutionGraph,
   buildContextGraph,
   buildTimingGraph,
+  buildParallelExecutionGraph,
   saveGraph,
 } from "../visualization";
 
@@ -148,10 +149,34 @@ export async function runCommand(
 
     // 9. Print final output
     printFinalOutput(context);
+    // ── Base output directory ──
+    const baseOutputDir = "output";
     // ── Build graphs once ──
     const executionGraph = buildExecutionGraph(context.timeline);
     const contextGraph = buildContextGraph(context);
     const timingGraph = buildTimingGraph(context.timeline);
+  
+    // ── Parallel execution graph (only for parallel workflows) ──
+    if (parsed.workflow.type === "parallel") {
+      const parallelExecutionGraph =
+        buildParallelExecutionGraph(context.timeline);
+
+      console.log("\n" + parallelExecutionGraph);
+
+      saveGraph(
+        baseOutputDir,
+        "parallel_execution_graph.txt",
+        parallelExecutionGraph
+      );
+
+      logger.info(
+        {
+          event: "PARALLEL_GRAPH_SAVED",
+          file: "output/graphs/parallel_execution_graph.txt",
+        },
+        "🧩 Parallel execution graph saved"
+      );
+    }
 
     // ── Print to console ──
     console.log("\n" + executionGraph);
@@ -159,7 +184,7 @@ export async function runCommand(
     console.log("\n" + timingGraph);
 
     // ── Save to files ──
-    const baseOutputDir = "output";
+    
 
     saveGraph(baseOutputDir, "execution_graph.txt", executionGraph);
     saveGraph(baseOutputDir, "context_graph.txt", contextGraph);
@@ -169,10 +194,13 @@ export async function runCommand(
       {
         event: "GRAPHS_SAVED",
         files: [
-          "output/graphs/execution_graph.txt",
-          "output/graphs/context_graph.txt",
-          "output/graphs/timing_graph.txt",
-        ],
+      "output/graphs/execution_graph.txt",
+      "output/graphs/context_graph.txt",
+      "output/graphs/timing_graph.txt",
+      ...(parsed.workflow.type === "parallel"
+        ? ["output/graphs/parallel_execution_graph.txt"]
+        : []),
+    ],
       },
       "📊 ASCII graphs saved to output/graphs/"
     );
