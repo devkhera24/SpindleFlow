@@ -27,12 +27,22 @@ import {
 
 export async function runCommand(
   configPath: string,
-  userInput: string
+  userInput: string,
+  apiKey?: string
 ) {
   const startTime = Date.now();
   
   // Clear previous log buffer for fresh run
   clearLogBuffer();
+  logger.info(
+    {
+      event: "API_KEY_STATUS",
+      providedViaCLI: Boolean(apiKey),
+    },
+    apiKey
+      ? "🔑 API key provided via CLI"
+      : "🔑 No API key provided via CLI (will fallback to env)"
+  );
   
   logger.info({
     event: "COMMAND_START",
@@ -85,6 +95,11 @@ export async function runCommand(
     configLogger.info({
       event: "SEMANTIC_VALIDATION_COMPLETE",
     }, `✅ Semantic validation passed`);
+    if (!apiKey && !process.env.GEMINI_API_KEY) {
+      throw new Error(
+        "Missing API key. Provide --api-key or set GEMINI_API_KEY."
+      );
+    }
 
     // 4. Build agent registry
     agentLogger.info({
@@ -117,7 +132,7 @@ export async function runCommand(
       event: "LLM_PROVIDER_SELECT_START",
     }, `🤖 Selecting LLM provider`);
 
-    const llm = getLLMProvider();
+    const llm = getLLMProvider({ apiKey });
 
     configLogger.info({
       event: "LLM_PROVIDER_SELECTED",

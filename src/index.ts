@@ -16,8 +16,9 @@ program
   .command("run")
   .argument("<config>", "Path to workflow YAML file")
   .option("-i, --input <input>", "User input", "")
+  .option("--api-key <key>", "LLM API key")
   .action(async (config, options) => {
-    await runCommand(config, options.input);
+    await runCommand(config, options.input, options.apiKey);
   });
 
 program.parse();
