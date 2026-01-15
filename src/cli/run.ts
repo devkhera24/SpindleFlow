@@ -21,6 +21,7 @@ import {
   buildExecutionGraph,
   buildContextGraph,
   buildTimingGraph,
+  saveGraph,
 } from "../visualization";
 
 export async function runCommand(
@@ -147,9 +148,34 @@ export async function runCommand(
 
     // 9. Print final output
     printFinalOutput(context);
-    console.log("\n" + buildExecutionGraph(context.timeline));
-    console.log("\n" + buildContextGraph(context));
-    console.log("\n" + buildTimingGraph(context.timeline));
+    // ── Build graphs once ──
+    const executionGraph = buildExecutionGraph(context.timeline);
+    const contextGraph = buildContextGraph(context);
+    const timingGraph = buildTimingGraph(context.timeline);
+
+    // ── Print to console ──
+    console.log("\n" + executionGraph);
+    console.log("\n" + contextGraph);
+    console.log("\n" + timingGraph);
+
+    // ── Save to files ──
+    const baseOutputDir = "output";
+
+    saveGraph(baseOutputDir, "execution_graph.txt", executionGraph);
+    saveGraph(baseOutputDir, "context_graph.txt", contextGraph);
+    saveGraph(baseOutputDir, "timing_graph.txt", timingGraph);
+
+    logger.info(
+      {
+        event: "GRAPHS_SAVED",
+        files: [
+          "output/graphs/execution_graph.txt",
+          "output/graphs/context_graph.txt",
+          "output/graphs/timing_graph.txt",
+        ],
+      },
+      "📊 ASCII graphs saved to output/graphs/"
+    );
 
     const endTime = Date.now();
     const totalDuration = endTime - startTime;
