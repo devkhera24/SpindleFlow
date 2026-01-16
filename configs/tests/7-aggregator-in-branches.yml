@@ -1,0 +1,26 @@
+# Test: Aggregator agent also in parallel branches
+# Expected: SemanticValidationError
+# Error: "Aggregator agent "summarizer" is also listed in parallel branches"
+# Suggestions: The 'then' agent should be different from branch agents
+
+agents:
+  - id: researcher
+    role: Research Analyst
+    goal: Research topics
+
+  - id: analyst
+    role: Data Analyst
+    goal: Analyze data
+
+  - id: summarizer
+    role: Summarizer
+    goal: Summarize findings
+
+workflow:
+  type: parallel
+  branches:
+    - researcher
+    - analyst
+    - summarizer  # Aggregator should not be in branches
+  then:
+    agent: summarizer

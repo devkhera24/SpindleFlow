@@ -1,0 +1,13 @@
+# Test: Wrong data type (steps should be array)
+# Expected: SchemaValidationError
+# Error: "Your configuration file has validation errors"
+# Details: Expected array, received object
+
+agents:
+  - id: researcher
+    role: Research Analyst
+    goal: Conduct research
+
+workflow:
+  type: sequential
+  steps: researcher  # Should be an array like [{agent: researcher}]

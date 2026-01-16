@@ -1,0 +1,20 @@
+# Test: Unknown agent reference in workflow
+# Expected: SemanticValidationError
+# Error: "Sequential workflow step 2 references unknown agent: "editor""
+# Suggestions: Shows available agents list
+
+agents:
+  - id: researcher
+    role: Research Analyst
+    goal: Conduct thorough research
+
+  - id: writer
+    role: Content Writer
+    goal: Write engaging content
+
+workflow:
+  type: sequential
+  steps:
+    - agent: researcher
+    - agent: editor  # This agent doesn't exist
+    - agent: writer

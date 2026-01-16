@@ -1,0 +1,5 @@
+# Test: Empty file
+# Expected: FileLoadingError
+# Error: "Configuration file is empty"
+# Note: This file should be emptied to test
+

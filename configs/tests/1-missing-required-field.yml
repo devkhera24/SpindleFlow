@@ -1,0 +1,14 @@
+# Test: Missing required field (goal)
+# Expected: SchemaValidationError
+# Error: "Your configuration file has validation errors"
+# Details: At "agents.0.goal": Invalid input: expected string, received undefined
+
+agents:
+  - id: researcher
+    role: Research Analyst
+    # Missing 'goal' field
+
+workflow:
+  type: sequential
+  steps:
+    - agent: researcher

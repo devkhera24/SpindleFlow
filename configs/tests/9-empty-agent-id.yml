@@ -1,0 +1,14 @@
+# Test: Empty agent ID
+# Expected: SchemaValidationError
+# Error: "Your configuration file has validation errors"
+# Details: String must contain at least 1 character(s)
+
+agents:
+  - id: ""  # Empty string
+    role: Research Analyst
+    goal: Conduct research
+
+workflow:
+  type: sequential
+  steps:
+    - agent: researcher

@@ -1,6 +1,12 @@
 import { loadYamlConfig } from "../config/loader";
 import { RootConfigSchema, RootConfig } from "../config/schema";
 import { validateSemantics } from "../config/validator";
+import { 
+  ConfigError, 
+  printConfigError, 
+  createSchemaValidationError 
+} from "../config/errors";
+import { ZodError } from "zod";
 import { AgentRegistry } from "../agents/registry";
 import { getLLMProvider } from "../llm";
 import { runWorkflow } from "../orchestrator/engine";
@@ -68,7 +74,15 @@ export async function runCommand(
       event: "CONFIG_PARSE_START",
     }, `🔍 Parsing and validating configuration schema`);
 
-    const parsed: RootConfig = RootConfigSchema.parse(rawConfig);
+    let parsed: RootConfig;
+    try {
+      parsed = RootConfigSchema.parse(rawConfig);
+    } catch (error) {
+      if (error instanceof ZodError) {
+        throw createSchemaValidationError(error);
+      }
+      throw error;
+    }
 
     configLogger.info({
       event: "CONFIG_PARSED",
@@ -228,6 +242,21 @@ export async function runCommand(
     const errorTime = Date.now();
     const duration = errorTime - startTime;
 
+    // Handle ConfigError (file loading, YAML parsing, schema validation, semantic validation)
+    if (error instanceof ConfigError) {
+      logger.error({
+        event: "CONFIG_ERROR",
+        duration,
+        errorType: error.name,
+        message: error.message,
+        timestamp: errorTime,
+      }, `❌ Configuration error after ${duration}ms`);
+
+      printConfigError(error);
+      process.exit(1);
+    }
+
+    // Handle all other errors
     logger.error({
       event: "COMMAND_ERROR",
       duration,

@@ -1,0 +1,19 @@
+# Test: Empty branches array in parallel workflow
+# Expected: SchemaValidationError
+# Error: "Your configuration file has validation errors"
+# Details: Array must contain at least 1 element(s)
+
+agents:
+  - id: researcher
+    role: Research Analyst
+    goal: Research topics
+
+  - id: summarizer
+    role: Summarizer
+    goal: Combine insights
+
+workflow:
+  type: parallel
+  branches: []  # Empty array
+  then:
+    agent: summarizer

@@ -1,0 +1,14 @@
+# Test: Invalid workflow type
+# Expected: SchemaValidationError
+# Error: Expected literal value "sequential" or "parallel"
+# Suggestions: Workflow type must be either 'sequential' or 'parallel'
+
+agents:
+  - id: researcher
+    role: Research Analyst
+    goal: Conduct research
+
+workflow:
+  type: series  # Invalid type - should be 'sequential' or 'parallel'
+  steps:
+    - agent: researcher

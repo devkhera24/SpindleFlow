@@ -1,0 +1,25 @@
+# Test: Unknown agent in parallel workflow branches
+# Expected: SemanticValidationError
+# Error: "Parallel workflow references unknown agent: "analyzer""
+# Suggestions: Shows available agents list
+
+agents:
+  - id: researcher
+    role: Research Analyst
+    goal: Research topics
+
+  - id: writer
+    role: Content Writer
+    goal: Write content
+
+  - id: summarizer
+    role: Summarizer
+    goal: Combine insights
+
+workflow:
+  type: parallel
+  branches:
+    - researcher
+    - analyzer  # This agent doesn't exist
+  then:
+    agent: summarizer

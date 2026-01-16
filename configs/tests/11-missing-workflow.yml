@@ -1,0 +1,11 @@
+# Test: Missing workflow section
+# Expected: SchemaValidationError
+# Error: "Your configuration file has validation errors"
+# Details: Required field missing
+
+agents:
+  - id: researcher
+    role: Research Analyst
+    goal: Conduct research
+
+# workflow section is missing entirely
