@@ -12,6 +12,9 @@ import {
   logDataTransfer,
   orchestratorLogger,
 } from "../logger/enhanced-logger";
+import { SubAgentExecutor } from "../agents/sub-agent-executor";
+import { PersistentMemoryManager, createEmbedding } from "../memory/persistent-memory";
+import { v4 as uuidv4 } from 'uuid';
 
 export async function runSequentialWorkflow(params: {
   steps: { agent: string }[];
@@ -19,11 +22,16 @@ export async function runSequentialWorkflow(params: {
   context: ContextStore;
   llm: LLMProvider;
   mcpRegistry?: MCPToolRegistry;
+  memoryManager?: PersistentMemoryManager;
+  workflowId?: string;
 }) {
-  const { steps, registry, context, llm, mcpRegistry } = params;
+  const { steps, registry, context, llm, mcpRegistry, memoryManager, workflowId } = params;
 
   // Initialize context summarizer
   const contextSummarizer = new ContextSummarizer(llm);
+  
+  // Initialize sub-agent executor
+  const subAgentExecutor = new SubAgentExecutor(llm, mcpRegistry, memoryManager);
 
   orchestratorLogger.info({
     event: "SEQUENTIAL_WORKFLOW_START",
@@ -132,7 +140,40 @@ export async function runSequentialWorkflow(params: {
       "implicit"
     );
 
-    const prompt = buildPrompt(agent, context, toolOutputs);
+    // NEW: Query persistent memory for relevant context
+    let relevantMemories: import("../memory/persistent-memory").RelevantMemory[] = [];
+    if (agent.enable_persistent_memory && memoryManager?.isInitialized()) {
+      try {
+        const queryText = `${agent.role}: ${agent.goal}`;
+        orchestratorLogger.info({
+          event: "QUERYING_PERSISTENT_MEMORY",
+          stepNumber,
+          agentId: agent.id,
+          queryText: queryText.substring(0, 100),
+        }, `🔍 Querying persistent memory for: ${agent.id}`);
+
+        relevantMemories = await memoryManager.queryMemoriesWithText(queryText, 5);
+
+        if (relevantMemories.length > 0) {
+          orchestratorLogger.info({
+            event: "PERSISTENT_MEMORIES_FOUND",
+            stepNumber,
+            agentId: agent.id,
+            memoryCount: relevantMemories.length,
+            topScore: relevantMemories[0]?.score || 0,
+          }, `✅ Found ${relevantMemories.length} relevant memories (top score: ${(relevantMemories[0]?.score || 0).toFixed(3)})`);
+        }
+      } catch (error) {
+        orchestratorLogger.warn({
+          event: "PERSISTENT_MEMORY_QUERY_ERROR",
+          stepNumber,
+          agentId: agent.id,
+          error: error instanceof Error ? error.message : String(error),
+        }, `⚠️ Failed to query persistent memory`);
+      }
+    }
+
+    const prompt = buildPrompt(agent, context, toolOutputs, relevantMemories);
 
     logDataTransfer(
       "PromptBuilder",
@@ -149,6 +190,53 @@ export async function runSequentialWorkflow(params: {
       userLength: prompt.user.length,
     }, `✅ Prompt built for: ${agent.id}`);
 
+    // Check if agent has sub-agents
+    let output: string;
+    let toolCallLog: any[] = [];
+
+    if (agent.sub_agents && agent.sub_agents.length > 0) {
+      console.log(`  🔍 Planning sub-agent delegation...`);
+
+      // 1. Plan which sub-agents to use
+      const plan = await subAgentExecutor.planSubAgentExecution(
+        agent,
+        context.userInput,
+        context
+      );
+
+      console.log(`  📋 Plan: ${plan.reason}`);
+      console.log(`  👥 Sub-agents: ${plan.subAgentsToCall.join(', ')}`);
+      console.log(`  ⚙️  Mode: ${plan.sequence}`);
+      console.log();
+
+      // 2. Execute sub-agents
+      const subOutputs = await subAgentExecutor.executeSubAgents(
+        agent,
+        plan,
+        context.userInput,
+        context
+      );
+
+      console.log(`  🔄 Synthesizing results...`);
+
+      // 3. Parent synthesizes results
+      output = await subAgentExecutor.synthesizeResults(
+        agent,
+        subOutputs,
+        context.userInput,
+        context
+      );
+
+      orchestratorLogger.info({
+        event: "SUB_AGENT_WORKFLOW_COMPLETE",
+        stepNumber,
+        agentId: agent.id,
+        subAgentCount: subOutputs.size,
+      }, `✅ Sub-agent workflow complete for: ${agent.id}`);
+
+    } else {
+      // Normal agent without sub-agents - proceed with standard execution
+
     // Call LLM
     logAgentExecution(agent.id, agent.role, "PROCESSING", {
       stepNumber,
@@ -164,9 +252,6 @@ export async function runSequentialWorkflow(params: {
       agentId: agent.id,
       llmProvider: llm.name,
     }, `🤖 Calling LLM for: ${agent.id}`);
-
-    let output: string;
-    let toolCallLog: any[] = [];
 
     // Check if agent has MCP tools assigned
     const agentMCPTools = agent.mcpTools || [];
@@ -222,6 +307,8 @@ export async function runSequentialWorkflow(params: {
         temperature: 0.2,
       });
     }
+    
+    } // End of else block for non-sub-agent workflow
 
     const endedAt = Date.now();
     const duration = endedAt - startedAt;
@@ -312,6 +399,53 @@ export async function runSequentialWorkflow(params: {
         { summary },
         "explicit"
       );
+
+      // Store in persistent memory if enabled
+      if (agent.enable_persistent_memory && memoryManager?.isInitialized()) {
+        try {
+          orchestratorLogger.info({
+            event: "STORING_PERSISTENT_MEMORY",
+            stepNumber,
+            agentId: agent.id,
+          }, `🧠 Storing to persistent memory: ${agent.id}`);
+
+          const memoryText = `${agent.role}: ${summary.keyInsights.join('. ')}. ${summary.decisions.join('. ')}`;
+          const provider = memoryManager.getEmbeddingProvider();
+          const embedding = await createEmbedding(memoryText, provider);
+
+          await memoryManager.storeMemory(
+            {
+              id: uuidv4(),
+              agentId: agent.id,
+              role: agent.role,
+              content: output,
+              keyInsights: summary.keyInsights,
+              decisions: summary.decisions,
+              artifacts: summary.artifacts,
+              timestamp: Date.now(),
+              workflowId: workflowId || 'default',
+              metadata: {
+                stepNumber,
+                duration,
+              },
+            },
+            embedding
+          );
+
+          orchestratorLogger.info({
+            event: "PERSISTENT_MEMORY_STORED",
+            stepNumber,
+            agentId: agent.id,
+          }, `✅ Persistent memory stored for: ${agent.id}`);
+        } catch (error) {
+          orchestratorLogger.error({
+            event: "PERSISTENT_MEMORY_ERROR",
+            stepNumber,
+            agentId: agent.id,
+            error: error instanceof Error ? error.message : String(error),
+          }, `❌ Failed to store persistent memory for: ${agent.id}`);
+        }
+      }
     } catch (error) {
       orchestratorLogger.error({
         event: "SUMMARY_CREATION_ERROR",

@@ -1,7 +1,2 @@
-export type Agent = {
-  id: string;
-  role: string;
-  goal: string;
-  tools?: string[];
-  mcpTools?: string[];
-};
+// Re-export the Agent type from schema to ensure consistency
+export type { Agent, SubAgent } from "../config/schema";

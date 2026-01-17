@@ -17,6 +17,9 @@ import {
   logDataTransfer,
   orchestratorLogger,
 } from "../logger/enhanced-logger";
+import { SubAgentExecutor } from "../agents/sub-agent-executor";
+import { PersistentMemoryManager, createEmbedding } from "../memory/persistent-memory";
+import { v4 as uuidv4 } from 'uuid';
 
 export async function runParallelWorkflow(params: {
   branches: string[];
@@ -25,11 +28,16 @@ export async function runParallelWorkflow(params: {
   context: ContextStore;
   llm: LLMProvider;
   mcpRegistry?: MCPToolRegistry;
+  memoryManager?: PersistentMemoryManager;
+  workflowId?: string;
 }) {
-  const { branches, then, registry, context, llm, mcpRegistry } = params;
+  const { branches, then, registry, context, llm, mcpRegistry, memoryManager, workflowId } = params;
 
   // Initialize context summarizer
   const contextSummarizer = new ContextSummarizer(llm);
+  
+  // Initialize sub-agent executor
+  const subAgentExecutor = new SubAgentExecutor(llm, mcpRegistry, memoryManager);
 
   orchestratorLogger.info({
     event: "PARALLEL_WORKFLOW_START",
@@ -141,7 +149,18 @@ export async function runParallelWorkflow(params: {
       "implicit"
     );
 
-    const prompt = buildPrompt(agent, context, toolOutputs);
+    // NEW: Query persistent memory for relevant context
+    let relevantMemories: import("../memory/persistent-memory").RelevantMemory[] = [];
+    if (agent.enable_persistent_memory && memoryManager?.isInitialized()) {
+      try {
+        const queryText = `${agent.role}: ${agent.goal}`;
+        relevantMemories = await memoryManager.queryMemoriesWithText(queryText, 5);
+      } catch (error) {
+        // Silent fail - continue without memories
+      }
+    }
+
+    const prompt = buildPrompt(agent, context, toolOutputs, relevantMemories);
 
     logDataTransfer(
       "PromptBuilder",
@@ -334,6 +353,57 @@ export async function runParallelWorkflow(params: {
         { summary },
         "explicit"
       );
+
+      // Get agent config to check if persistent memory is enabled
+      const branchAgent = registry.getAgent(result.agentId);
+      
+      // Store in persistent memory if enabled
+      if (branchAgent.enable_persistent_memory && memoryManager?.isInitialized()) {
+        try {
+          orchestratorLogger.info({
+            event: "STORING_PERSISTENT_MEMORY",
+            branchNumber: i + 1,
+            agentId: result.agentId,
+          }, `🧠 Storing to persistent memory: ${result.agentId}`);
+
+          const memoryText = `${result.role}: ${summary.keyInsights.join('. ')}. ${summary.decisions.join('. ')}`;
+          const provider = memoryManager.getEmbeddingProvider();
+          const embedding = await createEmbedding(memoryText, provider);
+
+          await memoryManager.storeMemory(
+            {
+              id: uuidv4(),
+              agentId: result.agentId,
+              role: result.role,
+              content: result.output,
+              keyInsights: summary.keyInsights,
+              decisions: summary.decisions,
+              artifacts: summary.artifacts,
+              timestamp: Date.now(),
+              workflowId: workflowId || 'default',
+              metadata: {
+                branchNumber: i + 1,
+                branchId: result.branchId,
+                duration: result.endedAt - result.startedAt,
+              },
+            },
+            embedding
+          );
+
+          orchestratorLogger.info({
+            event: "PERSISTENT_MEMORY_STORED",
+            branchNumber: i + 1,
+            agentId: result.agentId,
+          }, `✅ Persistent memory stored for: ${result.agentId}`);
+        } catch (error) {
+          orchestratorLogger.error({
+            event: "PERSISTENT_MEMORY_ERROR",
+            branchNumber: i + 1,
+            agentId: result.agentId,
+            error: error instanceof Error ? error.message : String(error),
+          }, `❌ Failed to store persistent memory for: ${result.agentId}`);
+        }
+      }
     } catch (error) {
       orchestratorLogger.error({
         event: "BRANCH_SUMMARY_ERROR",
@@ -427,7 +497,26 @@ export async function runParallelWorkflow(params: {
     "implicit"
   );
 
-  const finalPrompt = buildPrompt(finalAgent, context, aggregatorToolOutputs);
+  // NEW: Query persistent memory for aggregator
+  let aggregatorMemories: import("../memory/persistent-memory").RelevantMemory[] = [];
+  if (finalAgent.enable_persistent_memory && memoryManager?.isInitialized()) {
+    try {
+      const queryText = `${finalAgent.role}: ${finalAgent.goal}`;
+      aggregatorMemories = await memoryManager.queryMemoriesWithText(queryText, 5);
+      
+      if (aggregatorMemories.length > 0) {
+        orchestratorLogger.info({
+          event: "AGGREGATOR_MEMORIES_FOUND",
+          agentId: finalAgent.id,
+          memoryCount: aggregatorMemories.length,
+        }, `✅ Found ${aggregatorMemories.length} relevant memories for aggregator`);
+      }
+    } catch (error) {
+      // Silent fail
+    }
+  }
+
+  const finalPrompt = buildPrompt(finalAgent, context, aggregatorToolOutputs, aggregatorMemories);
 
   logDataTransfer(
     "PromptBuilder",
@@ -576,6 +665,50 @@ export async function runParallelWorkflow(params: {
       { summary: aggregatorSummary },
       "explicit"
     );
+
+    // Store in persistent memory if enabled
+    if (finalAgent.enable_persistent_memory && memoryManager?.isInitialized()) {
+      try {
+        orchestratorLogger.info({
+          event: "STORING_PERSISTENT_MEMORY",
+          agentId: finalAgent.id,
+        }, `🧠 Storing to persistent memory: ${finalAgent.id}`);
+
+        const memoryText = `${finalAgent.role}: ${aggregatorSummary.keyInsights.join('. ')}. ${aggregatorSummary.decisions.join('. ')}`;
+        const provider = memoryManager.getEmbeddingProvider();
+        const embedding = await createEmbedding(memoryText, provider);
+
+        await memoryManager.storeMemory(
+          {
+            id: uuidv4(),
+            agentId: finalAgent.id,
+            role: finalAgent.role,
+            content: finalOutput,
+            keyInsights: aggregatorSummary.keyInsights,
+            decisions: aggregatorSummary.decisions,
+            artifacts: aggregatorSummary.artifacts,
+            timestamp: Date.now(),
+            workflowId: workflowId || 'default',
+            metadata: {
+              phase: 'aggregation',
+              duration: aggregatorDuration,
+            },
+          },
+          embedding
+        );
+
+        orchestratorLogger.info({
+          event: "PERSISTENT_MEMORY_STORED",
+          agentId: finalAgent.id,
+        }, `✅ Persistent memory stored for: ${finalAgent.id}`);
+      } catch (error) {
+        orchestratorLogger.error({
+          event: "PERSISTENT_MEMORY_ERROR",
+          agentId: finalAgent.id,
+          error: error instanceof Error ? error.message : String(error),
+        }, `❌ Failed to store persistent memory for: ${finalAgent.id}`);
+      }
+    }
   } catch (error) {
     orchestratorLogger.error({
       event: "AGGREGATOR_SUMMARY_ERROR",

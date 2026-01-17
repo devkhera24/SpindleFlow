@@ -1,13 +1,15 @@
 import { Agent } from "../agents/agent";
 import { ContextStore } from "../context/store";
 import { promptLogger, logDataTransfer } from "../logger/enhanced-logger";
+import { RelevantMemory } from "../memory/persistent-memory";
 
 export function buildReviewPrompt(
   reviewer: Agent,
   context: ContextStore,
   branchOutputs: Map<string, { agentId: string; role: string; output: string }>,
   iteration: number,
-  approvalKeyword: string
+  approvalKeyword: string,
+  relevantMemories?: RelevantMemory[]
 ): { system: string; user: string } {
   promptLogger.info({
     event: "REVIEW_PROMPT_BUILD_START",
@@ -34,6 +36,23 @@ ${iteration > 1 ? 'This is a revision. Check if previous feedback has been addre
 `.trim();
 
   let userPrompt = `User Request:\n${context.userInput}\n\n`;
+
+  // Add relevant memories if provided
+  if (relevantMemories && relevantMemories.length > 0) {
+    userPrompt += `--- RELEVANT CONTEXT FROM PAST WORKFLOWS ---\n`;
+    for (let i = 0; i < relevantMemories.length; i++) {
+      const memory = relevantMemories[i];
+      const relevancePercent = Math.round((memory.score || 0) * 100);
+      userPrompt += `[Memory ${i + 1} - ${relevancePercent}% relevant] ${memory.role}:\n`;
+      if (memory.keyInsights.length > 0) {
+        userPrompt += `Insights: ${memory.keyInsights.join("; ")}\n`;
+      }
+      if (memory.decisions.length > 0) {
+        userPrompt += `Decisions: ${memory.decisions.join("; ")}\n`;
+      }
+    }
+    userPrompt += `--- END OF PAST CONTEXT ---\n\n`;
+  }
 
   userPrompt += `Agent Outputs to Review:\n\n`;
 

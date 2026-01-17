@@ -1,0 +1,37 @@
+# Simple Sub-Agent Test
+# Basic test to verify sub-agent system works
+
+models:
+  gpt4:
+    provider: openai
+    model: gpt-4
+    max_tokens: 2000
+
+provider: gpt4
+
+agents:
+  - id: writer
+    role: Writing Team Lead
+    goal: Create a well-structured article
+    delegation_strategy: sequential
+    
+    sub_agents:
+      - id: researcher
+        role: Research Specialist
+        goal: Gather key facts and information
+        specialization: Research and fact-finding
+      
+      - id: outliner
+        role: Content Outliner
+        goal: Create article structure
+        specialization: Organization and structure
+      
+      - id: drafter
+        role: Content Writer
+        goal: Write the article content
+        specialization: Writing and editing
+
+workflow:
+  type: sequential
+  steps:
+    - agent: writer

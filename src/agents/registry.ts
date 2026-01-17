@@ -7,13 +7,7 @@ export class AgentRegistry {
 
   constructor(config: RootConfig) {
     for (const agent of config.agents) {
-      this.agents.set(agent.id, {
-        id: agent.id,
-        role: agent.role,
-        goal: agent.goal,
-        tools: agent.tools,
-        mcpTools: agent.mcpTools,
-      });
+      this.agents.set(agent.id, agent);
     }
   }
 

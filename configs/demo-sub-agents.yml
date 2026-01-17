@@ -1,0 +1,113 @@
+# Demo: Sub-Agent System with Persistent Memory
+# This demonstrates hierarchical agent delegation and cross-workflow memory
+
+models:
+  gemini:
+    provider: gemini
+    model: gemini-2.5-flash-lite
+    max_tokens: 8000
+
+provider: gemini
+
+# Optional: Pinecone persistent memory configuration
+# NOTE: Using LOCAL embeddings (no OpenAI API calls!)
+pinecone_config:
+  # api_key will be read from PINECONE_API_KEY env var if not provided
+  index_name: spindleflow-memory
+  namespace: frontend-dev
+  dimension: 384  # For local sentence transformers
+  embedding_provider: local  # 'local' (no API) or 'openai' (requires API key)
+
+agents:
+  # Parent agent with sub-agents for frontend development
+  - id: frontend_lead
+    role: Frontend Development Lead
+    goal: Create a complete, production-ready frontend solution
+    delegation_strategy: auto  # Parent decides which sub-agents to call
+    enable_persistent_memory: true  # Now with caching & rate limiting
+    
+    sub_agents:
+      - id: ui_strategist
+        role: UI/UX Strategist
+        goal: Define user interface strategy and information architecture
+        specialization: High-level UI planning, user flows, and accessibility
+        trigger_conditions:
+          - "needs ui planning"
+          - "user experience design"
+          - "information architecture"
+          - "wireframe"
+      
+      - id: ui_designer
+        role: UI Designer
+        goal: Create detailed component designs and styling specifications
+        specialization: Visual design, component specifications, and design systems
+        trigger_conditions:
+          - "needs component design"
+          - "styling required"
+          - "visual design"
+          - "color scheme"
+          - "typography"
+      
+      - id: code_writer
+        role: Frontend Code Writer
+        goal: Implement components based on designs with best practices
+        specialization: React/Vue/Angular code implementation and optimization
+        tools:
+          - code_execution
+        mcpTools:
+          - filesystem
+        trigger_conditions:
+          - "needs implementation"
+          - "write code"
+          - "build components"
+          - "create files"
+      
+      - id: code_reviewer
+        role: Code Quality Reviewer
+        goal: Review code quality, best practices, accessibility, and potential issues
+        specialization: Code quality assurance, security, and performance
+        trigger_conditions:
+          - "review code"
+          - "quality check"
+          - "code complete"
+          - "security audit"
+
+  # Backend agent with sub-agents
+  - id: backend_lead
+    role: Backend Development Lead
+    goal: Design and implement robust backend services
+    delegation_strategy: sequential  # Execute all sub-agents in order
+    enable_persistent_memory: true  # Now with caching & rate limiting
+    
+    sub_agents:
+      - id: api_designer
+        role: API Architect
+        goal: Design RESTful API endpoints with proper versioning and documentation
+        specialization: API design, REST principles, and OpenAPI specs
+      
+      - id: db_architect
+        role: Database Architect
+        goal: Design efficient database schema with proper indexing and relationships
+        specialization: Database design, normalization, and optimization
+      
+      - id: backend_implementer
+        role: Backend Implementation Engineer
+        goal: Write clean, testable backend code with proper error handling
+        specialization: Backend code implementation and testing
+        mcpTools:
+          - filesystem
+          - code_execution
+
+  # Aggregator agent to review and consolidate both frontend and backend work
+  - id: tech_lead
+    role: Technical Lead
+    goal: Review, integrate, and provide final technical direction for the full-stack solution
+    enable_persistent_memory: true
+
+workflow:
+  type: parallel
+  branches:
+    - frontend_lead
+    - backend_lead
+  then:
+    agent: tech_lead

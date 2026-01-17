@@ -7,6 +7,8 @@ import { runSequentialWorkflow } from "./sequential";
 import { runParallelWorkflow } from "./parallel";
 import { runIterativeParallelWorkflow } from "./parallel-iterative";
 import { orchestratorLogger } from "../logger/enhanced-logger";
+import { PersistentMemoryManager } from "../memory/persistent-memory";
+import { v4 as uuidv4 } from 'uuid';
 
 export async function runWorkflow(params: {
   config: RootConfig;
@@ -17,6 +19,15 @@ export async function runWorkflow(params: {
 }) {
   const { config, registry, context, llm, mcpRegistry } = params;
 
+  // Initialize persistent memory if configured
+  let memoryManager: PersistentMemoryManager | undefined;
+  if (config.pinecone_config) {
+    memoryManager = new PersistentMemoryManager(config.pinecone_config);
+    await memoryManager.initialize();
+  }
+
+  const workflowId = uuidv4();
+
   if (config.workflow.type === "sequential") {
     await runSequentialWorkflow({
       steps: config.workflow.steps,
@@ -24,6 +35,8 @@ export async function runWorkflow(params: {
       context,
       llm,
       mcpRegistry,
+      memoryManager,
+      workflowId,
     });
   }
 
@@ -47,6 +60,8 @@ export async function runWorkflow(params: {
         context,
         llm,
         mcpRegistry,
+        memoryManager,
+        workflowId,
       });
     } else {
       orchestratorLogger.info({
@@ -61,6 +76,8 @@ export async function runWorkflow(params: {
         context,
         llm,
         mcpRegistry,
+        memoryManager,
+        workflowId,
       });
     }
   }

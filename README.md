@@ -8,7 +8,9 @@ SpindleFlow enables you to define complex multi-agent workflows using simple YAM
 
 - **🔀 Flexible Workflows:** Sequential and parallel agent execution
 - **🔄 Feedback Loops:** Iterative refinement with reviewer approval
+- **👥 Sub-Agent System:** Hierarchical agent delegation with intelligent task decomposition (NEW!)
 - **🧠 Context Management:** Intelligent summarization and context passing
+- **💾 Persistent Memory:** Pinecone-based vector memory for cross-workflow learning (NEW!)
 - **🔧 MCP Tool Integration:** Built-in filesystem, web search, and code execution tools
 - **🤖 Multi-Provider LLM:** Support for Google Gemini and OpenAI
 - **📊 Visualization:** Execution graphs, context flow, and timing diagrams
@@ -45,6 +47,12 @@ npm run dev -- run configs/demo-parallel.yml -i "Design a todo app"
 
 # MCP tools workflow
 npm run dev -- run configs/demo-mcp-tools.yml -i "Research quantum computing"
+
+# NEW: Sub-agent hierarchical workflow
+npm run dev -- run configs/demo-sub-agents.yml -i "Build a React dashboard"
+
+# NEW: Parallel sub-agents with memory
+npm run dev -- run configs/demo-parallel-sub-agents.yml -i "Create a full-stack app"
 ```
 
 ## 📦 MCP Tools
@@ -82,6 +90,7 @@ See [MCP_IMPLEMENTATION.md](MCP_IMPLEMENTATION.md) for full documentation.
 
 ## 📖 Documentation
 
+- **[Sub-Agents & Persistent Memory](SUB_AGENTS_AND_MEMORY.md)** - Hierarchical agents and Pinecone memory (NEW!)
 - **[MCP Implementation Guide](MCP_IMPLEMENTATION.md)** - Complete MCP tools documentation
 - **[MCP Quick Reference](MCP_QUICK_REFERENCE.md)** - Tool usage examples
 - **[Context Management](CONTEXT_MANAG.md)** - Context summarization strategy

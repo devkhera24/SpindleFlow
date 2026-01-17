@@ -1,0 +1,40 @@
+models:
+  gemini:
+    provider: gemini
+    model: gemini-2.5-flash-lite
+    max_tokens: 8000
+
+provider: gemini
+
+# Pinecone configuration with local embeddings
+pinecone_config:
+  index_name: "spindleflow-parallel-test"
+  namespace: "test-parallel"
+  embedding_provider: "local"  # Use local sentence transformers
+  dimension: 384  # all-MiniLM-L6-v2 dimension
+
+agents:
+  - id: planner
+    role: Planning Agent
+    goal: Create a high-level plan
+    enable_persistent_memory: true
+
+  - id: executor
+    role: Execution Agent
+    goal: Execute the plan with details
+    enable_persistent_memory: true
+
+  - id: reviewer
+    role: Review Agent
+    goal: Review and consolidate both perspectives
+    enable_persistent_memory: true
+
+workflow:
+  type: parallel
+
+  branches:
+    - planner
+    - executor
+
+  then:
+    agent: reviewer

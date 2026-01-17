@@ -1,11 +1,13 @@
 import { Agent } from "../agents/agent";
 import { ContextStore } from "../context/store";
 import { logPromptConstruction, logDataTransfer, promptLogger } from "../logger/enhanced-logger";
+import { RelevantMemory } from "../memory/persistent-memory";
 
 export function buildPrompt(
   agent: Agent,
   context: ContextStore,
-  toolOutputs?: string
+  toolOutputs?: string,
+  relevantMemories?: RelevantMemory[]
 ): { system: string; user: string } {
   promptLogger.info({
     event: "PROMPT_BUILD_START",
@@ -74,6 +76,72 @@ Follow the goal strictly. Be concise, clear, and relevant.
   );
 
   let userPrompt = `User input:\n${context.userInput}\n`;
+
+  // NEW: Add relevant memories from persistent storage BEFORE current workflow context
+  if (relevantMemories && relevantMemories.length > 0) {
+    promptLogger.info({
+      event: "ADDING_PERSISTENT_MEMORIES",
+      agentId: agent.id,
+      memoryCount: relevantMemories.length,
+      topScore: relevantMemories[0]?.score || 0,
+    }, `🧠 Adding ${relevantMemories.length} relevant memories from past workflows (top score: ${(relevantMemories[0]?.score || 0).toFixed(3)})`);
+
+    userPrompt += `\n--- RELEVANT CONTEXT FROM PAST WORKFLOWS ---\n`;
+    userPrompt += `You have access to relevant insights from previous work:\n\n`;
+
+    logDataTransfer(
+      "PersistentMemory",
+      "PromptBuilder",
+      { memoryCount: relevantMemories.length, memories: relevantMemories },
+      "implicit"
+    );
+
+    for (let i = 0; i < relevantMemories.length; i++) {
+      const memory = relevantMemories[i];
+      const relevancePercent = Math.round((memory.score || 0) * 100);
+      const date = memory.timestamp ? new Date(memory.timestamp).toLocaleString() : 'Unknown';
+      
+      promptLogger.debug({
+        event: "MEMORY_ADDED_TO_PROMPT",
+        agentId: agent.id,
+        memoryAgentId: memory.agentId,
+        memoryRole: memory.role,
+        relevance: relevancePercent,
+        timestamp: memory.timestamp,
+      }, `  💡 Memory ${i + 1}/${relevantMemories.length}: ${memory.role} (${relevancePercent}% relevant)`);
+
+      userPrompt += `[Memory ${i + 1} - ${relevancePercent}% relevant]\n`;
+      userPrompt += `From: ${memory.role} (${memory.agentId})\n`;
+      userPrompt += `Date: ${date}\n`;
+      
+      if (memory.keyInsights.length > 0) {
+        userPrompt += `Key Insights: ${memory.keyInsights.join("; ")}\n`;
+      }
+      
+      if (memory.decisions.length > 0) {
+        userPrompt += `Decisions: ${memory.decisions.join("; ")}\n`;
+      }
+      
+      // Include partial content if it's short enough
+      if (memory.content && memory.content.length <= 500) {
+        userPrompt += `Content: ${memory.content}\n`;
+      } else if (memory.content && memory.content.length > 500) {
+        userPrompt += `Content (excerpt): ${memory.content.substring(0, 500)}...\n`;
+      }
+      
+      userPrompt += `---\n`;
+
+      logDataTransfer(
+        `PersistentMemory:${memory.agentId}`,
+        `PromptBuilder->${agent.id}`,
+        { memory },
+        "implicit"
+      );
+    }
+
+    userPrompt += `\nUse these insights to inform your current work.\n`;
+    userPrompt += `--- END OF PAST WORKFLOW CONTEXT ---\n\n`;
+  }
 
   // Add tool outputs if any exist
   if (toolOutputs) {

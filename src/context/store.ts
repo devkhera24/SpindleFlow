@@ -21,6 +21,10 @@ export class ContextStore {
   private summaries: Map<string, ContextSummary> = new Map();
   private feedbackIterations: FeedbackIteration[] = [];
   private revisions: Map<string, Map<number, string>> = new Map();
+  
+  // Sub-agent support
+  private subAgentOutputs: Map<string, Map<string, string>> = new Map();
+  // parentId -> (subAgentId -> output)
 
   constructor(userInput: string) {
     this.userInput = userInput;
@@ -318,5 +322,29 @@ export class ContextStore {
     }, `🔍 Retrieved revision for ${agentId} iteration ${iteration}`);
 
     return revision;
+  }
+
+  // Sub-agent methods
+  setSubAgentOutput(parentId: string, subAgentId: string, output: string): void {
+    if (!this.subAgentOutputs.has(parentId)) {
+      this.subAgentOutputs.set(parentId, new Map());
+    }
+
+    this.subAgentOutputs.get(parentId)!.set(subAgentId, output);
+
+    contextLogger.info({
+      event: 'SUB_AGENT_OUTPUT_SET',
+      parentId,
+      subAgentId,
+      outputLength: output.length,
+    }, `📝 Sub-agent output stored: ${parentId} > ${subAgentId}`);
+  }
+
+  getSubAgentOutputs(parentId: string): Map<string, string> {
+    return this.subAgentOutputs.get(parentId) || new Map();
+  }
+
+  getAllSubAgentOutputs(): Map<string, Map<string, string>> {
+    return this.subAgentOutputs;
   }
 }

@@ -1,0 +1,76 @@
+# Demo: Parallel Sub-Agents with Memory
+# Shows parallel delegation of sub-agents with persistent memory
+
+models:
+  openai:
+    provider: openai
+    model: gpt-4o
+    max_tokens: 4096
+
+provider: openai
+
+pinecone_config:
+  index_name: spindleflow-memory
+  namespace: parallel-demo
+  dimension: 384  # For local sentence transformers
+  embedding_provider: local  # No OpenAI API calls!
+
+agents:
+  # Multiple parent agents execute in parallel
+  - id: frontend_specialist
+    role: Frontend Specialist
+    goal: Handle all frontend concerns
+    delegation_strategy: parallel  # All sub-agents execute in parallel
+    enable_persistent_memory: true
+    
+    sub_agents:
+      - id: react_expert
+        role: React Expert
+        goal: Implement React components with hooks and modern patterns
+        specialization: React, hooks, context, and state management
+      
+      - id: styling_expert
+        role: Styling Expert
+        goal: Create responsive, accessible CSS with modern techniques
+        specialization: CSS, Tailwind, styled-components, and responsiveness
+      
+      - id: testing_expert
+        role: Testing Expert
+        goal: Write comprehensive unit and integration tests
+        specialization: Jest, React Testing Library, and test patterns
+
+  - id: backend_specialist
+    role: Backend Specialist
+    goal: Handle all backend concerns
+    delegation_strategy: parallel
+    enable_persistent_memory: true
+    
+    sub_agents:
+      - id: api_expert
+        role: API Expert
+        goal: Design and implement REST APIs
+        specialization: Express, Fastify, API design
+      
+      - id: database_expert
+        role: Database Expert
+        goal: Design schema and write queries
+        specialization: PostgreSQL, MongoDB, query optimization
+      
+      - id: auth_expert
+        role: Authentication Expert
+        goal: Implement secure authentication
+        specialization: JWT, OAuth, security best practices
+
+  # Aggregator reviews all work
+  - id: tech_lead
+    role: Technical Lead & Architect
+    goal: Review all implementations and ensure cohesive architecture
+    enable_persistent_memory: true
+
+workflow:
+  type: parallel
+  branches:
+    - frontend_specialist
+    - backend_specialist
+  then:
+    agent: tech_lead

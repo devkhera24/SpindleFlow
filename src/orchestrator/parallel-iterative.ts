@@ -25,6 +25,8 @@ import {
   logDataTransfer,
   orchestratorLogger,
 } from "../logger/enhanced-logger";
+import { PersistentMemoryManager, createEmbedding } from "../memory/persistent-memory";
+import { v4 as uuidv4 } from 'uuid';
 
 interface BranchResult {
   agentId: string;
@@ -43,8 +45,10 @@ export async function runIterativeParallelWorkflow(params: {
   context: ContextStore;
   llm: LLMProvider;
   mcpRegistry?: MCPToolRegistry;
+  memoryManager?: PersistentMemoryManager;
+  workflowId?: string;
 }) {
-  const { branches, then, registry, context, llm, mcpRegistry } = params;
+  const { branches, then, registry, context, llm, mcpRegistry, memoryManager, workflowId } = params;
   const config = then.feedback_loop;
 
   orchestratorLogger.info({
@@ -70,7 +74,9 @@ export async function runIterativeParallelWorkflow(params: {
     context,
     llm,
     contextSummarizer,
-    iteration
+    iteration,
+    memoryManager,
+    workflowId
   );
 
   // Feedback loop
@@ -103,13 +109,25 @@ export async function runIterativeParallelWorkflow(params: {
       aggregatorToolOutputs = toolInvoker.formatToolResults(toolResults);
     }
 
+    // NEW: Query persistent memory for reviewer
+    let reviewerMemories: import("../memory/persistent-memory").RelevantMemory[] = [];
+    if (reviewerAgent.enable_persistent_memory && memoryManager?.isInitialized()) {
+      try {
+        const queryText = `${reviewerAgent.role}: ${reviewerAgent.goal}`;
+        reviewerMemories = await memoryManager.queryMemoriesWithText(queryText, 5);
+      } catch (error) {
+        // Silent fail
+      }
+    }
+
     // Build review prompt
     const reviewPrompt = buildReviewPrompt(
       reviewerAgent,
       context,
       branchOutputs,
       iteration,
-      config.approval_keyword
+      config.approval_keyword,
+      reviewerMemories
     );
 
     logAgentExecution(reviewerAgent.id, reviewerAgent.role, "PROCESSING", {
@@ -172,6 +190,54 @@ export async function runIterativeParallelWorkflow(params: {
         reviewerAgent.role
       );
       context.setSummary(reviewerAgent.id, summary);
+
+      // Store in persistent memory if enabled
+      if (reviewerAgent.enable_persistent_memory && memoryManager?.isInitialized()) {
+        try {
+          orchestratorLogger.info({
+            event: "STORING_PERSISTENT_MEMORY",
+            agentId: reviewerAgent.id,
+            iteration,
+          }, `🧠 Storing to persistent memory: ${reviewerAgent.id}`);
+
+          const memoryText = `${reviewerAgent.role}: ${summary.keyInsights.join('. ')}. ${summary.decisions.join('. ')}`;
+          const provider = memoryManager.getEmbeddingProvider();
+          const embedding = await createEmbedding(memoryText, provider);
+
+          await memoryManager.storeMemory(
+            {
+              id: uuidv4(),
+              agentId: reviewerAgent.id,
+              role: reviewerAgent.role,
+              content: reviewOutput,
+              keyInsights: summary.keyInsights,
+              decisions: summary.decisions,
+              artifacts: summary.artifacts,
+              timestamp: Date.now(),
+              workflowId: workflowId || 'default',
+              metadata: {
+                iteration,
+                isAggregator: true,
+                duration: endedAt - startedAt,
+              },
+            },
+            embedding
+          );
+
+          orchestratorLogger.info({
+            event: "PERSISTENT_MEMORY_STORED",
+            agentId: reviewerAgent.id,
+            iteration,
+          }, `✅ Persistent memory stored for: ${reviewerAgent.id}`);
+        } catch (error) {
+          orchestratorLogger.error({
+            event: "PERSISTENT_MEMORY_ERROR",
+            agentId: reviewerAgent.id,
+            iteration,
+            error: error instanceof Error ? error.message : String(error),
+          }, `❌ Failed to store persistent memory for: ${reviewerAgent.id}`);
+        }
+      }
     } catch (error) {
       orchestratorLogger.error({
         event: "SUMMARY_ERROR",
@@ -225,7 +291,9 @@ export async function runIterativeParallelWorkflow(params: {
       context,
       llm,
       contextSummarizer,
-      iteration
+      iteration,
+      memoryManager,
+      workflowId
     );
   }
 
@@ -257,7 +325,9 @@ async function executeParallelBranches(
   context: ContextStore,
   llm: LLMProvider,
   contextSummarizer: ContextSummarizer,
-  iteration: number
+  iteration: number,
+  memoryManager?: PersistentMemoryManager,
+  workflowId?: string
 ): Promise<Map<string, BranchResult>> {
   orchestratorLogger.info({
     event: "PARALLEL_BRANCHES_START",
@@ -291,8 +361,19 @@ async function executeParallelBranches(
       toolOutputs = toolInvoker.formatToolResults(toolResults);
     }
 
+    // NEW: Query persistent memory for relevant context
+    let relevantMemories: import("../memory/persistent-memory").RelevantMemory[] = [];
+    if (agent.enable_persistent_memory && memoryManager?.isInitialized()) {
+      try {
+        const queryText = `${agent.role}: ${agent.goal}`;
+        relevantMemories = await memoryManager.queryMemoriesWithText(queryText, 5);
+      } catch (error) {
+        // Silent fail - continue without memories
+      }
+    }
+
     // Build prompt
-    const prompt = buildPrompt(agent, context, toolOutputs);
+    const prompt = buildPrompt(agent, context, toolOutputs, relevantMemories);
 
     logAgentExecution(agent.id, agent.role, "PROCESSING", {
       branchNumber,
@@ -353,6 +434,58 @@ async function executeParallelBranches(
         result.role
       );
       context.setSummary(result.agentId, summary);
+
+      // Get agent config to check if persistent memory is enabled
+      const branchAgent = registry.getAgent(result.agentId);
+
+      // Store in persistent memory if enabled
+      if (branchAgent.enable_persistent_memory && memoryManager?.isInitialized()) {
+        try {
+          orchestratorLogger.info({
+            event: "STORING_PERSISTENT_MEMORY",
+            agentId: result.agentId,
+            iteration,
+          }, `🧠 Storing to persistent memory: ${result.agentId}`);
+
+          const memoryText = `${result.role}: ${summary.keyInsights.join('. ')}. ${summary.decisions.join('. ')}`;
+          const provider = memoryManager.getEmbeddingProvider();
+          const embedding = await createEmbedding(memoryText, provider);
+
+          await memoryManager.storeMemory(
+            {
+              id: uuidv4(),
+              agentId: result.agentId,
+              role: result.role,
+              content: result.output,
+              keyInsights: summary.keyInsights,
+              decisions: summary.decisions,
+              artifacts: summary.artifacts,
+              timestamp: Date.now(),
+              workflowId: workflowId || 'default',
+              metadata: {
+                iteration,
+                branchId: result.branchId,
+                branchIndex: result.branchIndex,
+                duration: result.endedAt - result.startedAt,
+              },
+            },
+            embedding
+          );
+
+          orchestratorLogger.info({
+            event: "PERSISTENT_MEMORY_STORED",
+            agentId: result.agentId,
+            iteration,
+          }, `✅ Persistent memory stored for: ${result.agentId}`);
+        } catch (error) {
+          orchestratorLogger.error({
+            event: "PERSISTENT_MEMORY_ERROR",
+            agentId: result.agentId,
+            iteration,
+            error: error instanceof Error ? error.message : String(error),
+          }, `❌ Failed to store persistent memory for: ${result.agentId}`);
+        }
+      }
     } catch (error) {
       orchestratorLogger.error({
         event: "SUMMARY_ERROR",
@@ -378,7 +511,9 @@ async function executeRevisions(
   context: ContextStore,
   llm: LLMProvider,
   contextSummarizer: ContextSummarizer,
-  iteration: number
+  iteration: number,
+  memoryManager?: PersistentMemoryManager,
+  workflowId?: string
 ): Promise<Map<string, BranchResult>> {
   orchestratorLogger.info({
     event: "REVISIONS_START",
@@ -481,6 +616,62 @@ async function executeRevisions(
         revision.role
       );
       context.setSummary(revision.agentId, summary);
+
+      // Get agent config to check if persistent memory is enabled
+      const revisionAgent = registry.getAgent(revision.agentId);
+
+      // Store in persistent memory if enabled
+      if (revisionAgent.enable_persistent_memory && memoryManager?.isInitialized()) {
+        try {
+          orchestratorLogger.info({
+            event: "STORING_PERSISTENT_MEMORY",
+            agentId: revision.agentId,
+            iteration,
+            phase: "revision",
+          }, `🧠 Storing to persistent memory: ${revision.agentId}`);
+
+          const memoryText = `${revision.role}: ${summary.keyInsights.join('. ')}. ${summary.decisions.join('. ')}`;
+          const provider = memoryManager.getEmbeddingProvider();
+          const embedding = await createEmbedding(memoryText, provider);
+
+          await memoryManager.storeMemory(
+            {
+              id: uuidv4(),
+              agentId: revision.agentId,
+              role: revision.role,
+              content: revision.output,
+              keyInsights: summary.keyInsights,
+              decisions: summary.decisions,
+              artifacts: summary.artifacts,
+              timestamp: Date.now(),
+              workflowId: workflowId || 'default',
+              metadata: {
+                iteration,
+                phase: 'revision',
+                branchId: revision.branchId,
+                branchIndex: revision.branchIndex,
+                duration: revision.endedAt - revision.startedAt,
+              },
+            },
+            embedding
+          );
+
+          orchestratorLogger.info({
+            event: "PERSISTENT_MEMORY_STORED",
+            agentId: revision.agentId,
+            iteration,
+            phase: "revision",
+          }, `✅ Persistent memory stored for: ${revision.agentId}`);
+        } catch (error) {
+          orchestratorLogger.error({
+            event: "PERSISTENT_MEMORY_ERROR",
+            agentId: revision.agentId,
+            iteration,
+            phase: "revision",
+            error: error instanceof Error ? error.message : String(error),
+          }, `❌ Failed to store persistent memory for: ${revision.agentId}`);
+        }
+      }
     } catch (error) {
       orchestratorLogger.error({
         event: "SUMMARY_ERROR",
