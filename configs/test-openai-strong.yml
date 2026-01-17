@@ -1,0 +1,36 @@
+models:
+  gemini:
+    provider: gemini
+    model: gemini-2.5-flash-lite
+    max_tokens: 8000
+  openai:
+    provider: openai
+    model: gpt-4o
+    max_tokens: 4096
+
+provider: gemini
+
+agents:
+  - id: strategist
+    role: "Product Strategist"
+    goal: "Define the high-level roadmap and business objectives for the requested product. Focus on market positioning and unique value propositions."
+
+  - id: tech_architect
+    role: "Cloud Architect"
+    goal: "Design a scalable, cloud-native architecture for the product. Specify stack, data models, and infrastructure requirements."
+
+  - id: security_analyst
+    role: "Cybersecurity Expert"
+    goal: "Identify potential security risks, compliance requirements (GDPR/HIPAA), and recommend mitigation strategies for the proposed architecture."
+
+  - id: synthesizer
+    role: "Technical Lead"
+    goal: "Consolidate the strategy, architecture, and security reports into a single, cohesive Technical Requirements Document (TRD)."
+
+workflow:
+  type: sequential
+  steps:
+    - agent: strategist
+    - agent: tech_architect
+    - agent: security_analyst
+    - agent: synthesizer

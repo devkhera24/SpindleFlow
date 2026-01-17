@@ -106,11 +106,6 @@ export async function runCommand(
     configLogger.info({
       event: "SEMANTIC_VALIDATION_COMPLETE",
     }, `✅ Semantic validation passed`);
-    if (!apiKey && !process.env.GEMINI_API_KEY) {
-      throw new Error(
-        "Missing API key. Provide --api-key or set GEMINI_API_KEY."
-      );
-    }
 
     // 4. Build agent registry
     agentLogger.info({
