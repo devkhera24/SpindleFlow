@@ -6,6 +6,7 @@ import { ToolInvoker } from "../tools/invoker";
 import { ContextSummarizer } from "../context/summarizer";
 import { MCPToolRegistry } from "../mcp/registry";
 import { ToolAwareLLMProvider } from "../llm/tool-aware-provider";
+import { getDashboardServer } from "../server/dashboard-server";
 import {
   printParallelStart,
   printParallelComplete,
@@ -33,11 +34,23 @@ export async function runParallelWorkflow(params: {
 }) {
   const { branches, then, registry, context, llm, mcpRegistry, memoryManager, workflowId } = params;
 
+  // Get dashboard server instance (if running)
+  const dashboard = getDashboardServer();
+
   // Initialize context summarizer
   const contextSummarizer = new ContextSummarizer(llm);
   
   // Initialize sub-agent executor
   const subAgentExecutor = new SubAgentExecutor(llm, mcpRegistry, memoryManager);
+
+  // Send dashboard event for workflow start
+  if (dashboard) {
+    dashboard.sendEvent({
+      type: 'workflow_start',
+      timestamp: Date.now(),
+      data: { type: 'parallel', totalBranches: branches.length, aggregator: then.agent }
+    });
+  }
 
   orchestratorLogger.info({
     event: "PARALLEL_WORKFLOW_START",
@@ -95,6 +108,15 @@ export async function runParallelWorkflow(params: {
 
     const startedAt = Date.now();
 
+    // Send dashboard event for agent start
+    if (dashboard) {
+      dashboard.sendEvent({
+        type: 'agent_start',
+        timestamp: startedAt,
+        data: { agentId: agent.id, role: agent.role, branchNumber, totalBranches: branches.length }
+      });
+    }
+
     logAgentExecution(agent.id, agent.role, "START", {
       branchNumber,
       totalBranches: branches.length,
@@ -126,6 +148,21 @@ export async function runParallelWorkflow(params: {
         toolCount: toolResults.length,
       }, `✅ Tools invoked for branch: ${toolResults.length} tools executed`);
 
+      // Send dashboard events for standard tool invocations
+      if (dashboard) {
+        for (const tool of agent.tools || []) {
+          dashboard.sendEvent({
+            type: 'tool_invocation',
+            timestamp: Date.now(),
+            data: {
+              toolName: tool,
+              agentId: agent.id,
+              type: 'Standard'
+            }
+          });
+        }
+      }
+
       logDataTransfer(
         "ToolInvoker",
         `Branch:${agent.id}`,
@@ -155,6 +192,24 @@ export async function runParallelWorkflow(params: {
       try {
         const queryText = `${agent.role}: ${agent.goal}`;
         relevantMemories = await memoryManager.queryMemoriesWithText(queryText, 5);
+
+        // Send dashboard event for memory query
+        if (dashboard) {
+          dashboard.sendEvent({
+            type: 'memory_query',
+            timestamp: Date.now(),
+            data: { agentId: agent.id, resultCount: relevantMemories.length }
+          });
+        }
+
+        // Send dashboard event for memory query
+        if (dashboard) {
+          dashboard.sendEvent({
+            type: 'memory_query',
+            timestamp: Date.now(),
+            data: { agentId: agent.id, resultCount: relevantMemories.length }
+          });
+        }
       } catch (error) {
         // Silent fail - continue without memories
       }
@@ -231,6 +286,21 @@ export async function runParallelWorkflow(params: {
         toolCallCount: toolCallLog.length,
         tools: toolCallLog.map(tc => tc.toolName),
       }, `✅ Executed ${toolCallLog.length} tool calls`);
+
+      // Send dashboard events for MCP tool invocations
+      if (dashboard) {
+        for (const toolCall of toolCallLog) {
+          dashboard.sendEvent({
+            type: 'tool_invocation',
+            timestamp: Date.now(),
+            data: {
+              toolName: toolCall.toolName,
+              agentId: agent.id,
+              type: 'MCP'
+            }
+          });
+        }
+      }
     } else {
       // Use standard LLM provider for agents without MCP tools
       output = await llm.generate({
@@ -251,6 +321,15 @@ export async function runParallelWorkflow(params: {
       outputLength: output.length,
       timestamp: endedAt,
     }, `✅ Branch ${branchNumber}/${branches.length} complete: ${agentId} (${duration}ms)`);
+
+    // Send dashboard event for agent completion
+    if (dashboard) {
+      dashboard.sendEvent({
+        type: 'agent_complete',
+        timestamp: endedAt,
+        data: { agentId: agent.id, duration, outputLength: output.length }
+      });
+    }
 
     logDataTransfer(
       `LLM:${llm.name}`,
@@ -395,6 +474,15 @@ export async function runParallelWorkflow(params: {
             branchNumber: i + 1,
             agentId: result.agentId,
           }, `✅ Persistent memory stored for: ${result.agentId}`);
+
+          // Send dashboard event for memory store
+          if (dashboard) {
+            dashboard.sendEvent({
+              type: 'memory_store',
+              timestamp: Date.now(),
+              data: { agentId: result.agentId }
+            });
+          }
         } catch (error) {
           orchestratorLogger.error({
             event: "PERSISTENT_MEMORY_ERROR",
@@ -428,10 +516,21 @@ export async function runParallelWorkflow(params: {
   }
 
   // Run the final "then" agent (aggregator)
+  const aggregatorStartTime = Date.now();
+
+  // Send dashboard event for aggregator start
+  if (dashboard) {
+    dashboard.sendEvent({
+      type: 'agent_start',
+      timestamp: aggregatorStartTime,
+      data: { agentId: then.agent, role: 'aggregator', phase: 'aggregation' }
+    });
+  }
+
   orchestratorLogger.info({
     event: "AGGREGATOR_START",
     agentId: then.agent,
-    timestamp: Date.now(),
+    timestamp: aggregatorStartTime,
   }, `🔷 Starting aggregator: ${then.agent}`);
 
   const finalAgent = registry.getAgent(then.agent);
@@ -503,6 +602,15 @@ export async function runParallelWorkflow(params: {
     try {
       const queryText = `${finalAgent.role}: ${finalAgent.goal}`;
       aggregatorMemories = await memoryManager.queryMemoriesWithText(queryText, 5);
+
+      // Send dashboard event for memory query
+      if (dashboard) {
+        dashboard.sendEvent({
+          type: 'memory_query',
+          timestamp: Date.now(),
+          data: { agentId: finalAgent.id, resultCount: aggregatorMemories.length }
+        });
+      }
       
       if (aggregatorMemories.length > 0) {
         orchestratorLogger.info({
@@ -584,6 +692,21 @@ export async function runParallelWorkflow(params: {
       tools: aggregatorToolCallLog.map(tc => tc.toolName),
       phase: "aggregation",
     }, `✅ Aggregator executed ${aggregatorToolCallLog.length} tool calls`);
+
+    // Send dashboard events for MCP tool invocations
+    if (dashboard) {
+      for (const toolCall of aggregatorToolCallLog) {
+        dashboard.sendEvent({
+          type: 'tool_invocation',
+          timestamp: Date.now(),
+          data: {
+            toolName: toolCall.toolName,
+            agentId: finalAgent.id,
+            type: 'MCP'
+          }
+        });
+      }
+    }
   } else {
     // Use standard LLM provider for aggregator without MCP tools
     finalOutput = await llm.generate({
@@ -594,7 +717,7 @@ export async function runParallelWorkflow(params: {
   }
 
   const endedAt = Date.now();
-  const aggregatorDuration = endedAt - startedAt;
+  const aggregatorDuration = endedAt - aggregatorStartTime;
 
   orchestratorLogger.info({
     event: "AGGREGATOR_COMPLETE",
@@ -603,6 +726,15 @@ export async function runParallelWorkflow(params: {
     outputLength: finalOutput.length,
     timestamp: endedAt,
   }, `✅ Aggregator complete: ${finalAgent.id} (${aggregatorDuration}ms)`);
+
+  // Send dashboard event for aggregator completion
+  if (dashboard) {
+    dashboard.sendEvent({
+      type: 'agent_complete',
+      timestamp: endedAt,
+      data: { agentId: finalAgent.id, duration: aggregatorDuration, outputLength: finalOutput.length }
+    });
+  }
 
   logDataTransfer(
     `LLM:${llm.name}`,
@@ -701,6 +833,15 @@ export async function runParallelWorkflow(params: {
           event: "PERSISTENT_MEMORY_STORED",
           agentId: finalAgent.id,
         }, `✅ Persistent memory stored for: ${finalAgent.id}`);
+
+        // Send dashboard event for memory store
+        if (dashboard) {
+          dashboard.sendEvent({
+            type: 'memory_store',
+            timestamp: Date.now(),
+            data: { agentId: finalAgent.id }
+          });
+        }
       } catch (error) {
         orchestratorLogger.error({
           event: "PERSISTENT_MEMORY_ERROR",
@@ -721,6 +862,19 @@ export async function runParallelWorkflow(params: {
   printAgentComplete(finalEntry);
 
   const totalWorkflowDuration = Date.now() - parallelStartTime;
+
+  // Send dashboard event for workflow end
+  if (dashboard) {
+    dashboard.sendEvent({
+      type: 'workflow_end',
+      timestamp: Date.now(),
+      data: { 
+        duration: totalWorkflowDuration, 
+        agentCount: branches.length + 1, // branches + aggregator
+        type: 'parallel'
+      }
+    });
+  }
 
   orchestratorLogger.info({
     event: "PARALLEL_WORKFLOW_COMPLETE",

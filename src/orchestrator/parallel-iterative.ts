@@ -5,6 +5,7 @@ import { FeedbackLoopConfig } from "../config/feedback-schema";
 import { FeedbackProcessor } from "./feedback-processor";
 import { ContextSummarizer } from "../context/summarizer";
 import { MCPToolRegistry } from "../mcp/registry";
+import { getDashboardServer } from "../server/dashboard-server";
 import { buildReviewPrompt, buildRevisionPrompt } from "../prompt/feedback-prompts";
 import { buildPrompt } from "../prompt/builder";
 import { ToolInvoker } from "../tools/invoker";
@@ -51,6 +52,25 @@ export async function runIterativeParallelWorkflow(params: {
   const { branches, then, registry, context, llm, mcpRegistry, memoryManager, workflowId } = params;
   const config = then.feedback_loop;
 
+  // Get dashboard server instance (if running)
+  const dashboard = getDashboardServer();
+
+  const workflowStartTime = Date.now();
+
+  // Send dashboard event for workflow start
+  if (dashboard) {
+    dashboard.sendEvent({
+      type: 'workflow_start',
+      timestamp: workflowStartTime,
+      data: { 
+        type: 'parallel-iterative', 
+        totalBranches: branches.length, 
+        aggregator: then.agent,
+        maxIterations: config.max_iterations
+      }
+    });
+  }
+
   orchestratorLogger.info({
     event: "ITERATIVE_PARALLEL_WORKFLOW_START",
     totalBranches: branches.length,
@@ -76,7 +96,8 @@ export async function runIterativeParallelWorkflow(params: {
     contextSummarizer,
     iteration,
     memoryManager,
-    workflowId
+    workflowId,
+    dashboard
   );
 
   // Feedback loop
@@ -312,6 +333,21 @@ export async function runIterativeParallelWorkflow(params: {
     approved,
   }, `🎉 Iterative parallel workflow complete (${iteration} iterations, ${approved ? 'APPROVED' : 'NOT APPROVED'})`);
 
+  // Send dashboard event for workflow end
+  if (dashboard) {
+    dashboard.sendEvent({
+      type: 'workflow_end',
+      timestamp: Date.now(),
+      data: { 
+        duration: Date.now() - workflowStartTime,
+        agentCount: branches.length,
+        type: 'parallel-iterative',
+        iterations: iteration,
+        approved
+      }
+    });
+  }
+
   return {
     approved,
     iterations: iteration,
@@ -327,7 +363,8 @@ async function executeParallelBranches(
   contextSummarizer: ContextSummarizer,
   iteration: number,
   memoryManager?: PersistentMemoryManager,
-  workflowId?: string
+  workflowId?: string,
+  dashboard?: ReturnType<typeof getDashboardServer>
 ): Promise<Map<string, BranchResult>> {
   orchestratorLogger.info({
     event: "PARALLEL_BRANCHES_START",
@@ -342,6 +379,15 @@ async function executeParallelBranches(
     const agent = registry.getAgent(agentId);
 
     const startedAt = Date.now();
+
+    // Send dashboard event for agent start
+    if (dashboard) {
+      dashboard.sendEvent({
+        type: 'agent_start',
+        timestamp: startedAt,
+        data: { agentId: agent.id, role: agent.role, branchNumber, totalBranches: branches.length, iteration }
+      });
+    }
 
     logAgentExecution(agent.id, agent.role, "START", {
       branchNumber,
@@ -389,6 +435,15 @@ async function executeParallelBranches(
     });
 
     const endedAt = Date.now();
+
+    // Send dashboard event for agent completion
+    if (dashboard) {
+      dashboard.sendEvent({
+        type: 'agent_complete',
+        timestamp: endedAt,
+        data: { agentId: agent.id, duration: endedAt - startedAt, outputLength: output.length }
+      });
+    }
 
     logAgentExecution(agent.id, agent.role, "COMPLETE", {
       branchNumber,

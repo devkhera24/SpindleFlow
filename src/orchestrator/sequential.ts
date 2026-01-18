@@ -134,6 +134,21 @@ export async function runSequentialWorkflow(params: {
         previousOutputs: context.getPreviousOutputs(),
       });
 
+      // Send tool invocation events to dashboard
+      toolResults.forEach((result: any) => {
+        dashboard.sendEvent({
+          type: 'tool_invocation',
+          timestamp: Date.now(),
+          data: {
+            toolName: result.tool,
+            agentId: agent.id,
+            type: 'standard',
+            success: result.success,
+            duration: result.duration
+          }
+        });
+      });
+
       toolOutputs = toolInvoker.formatToolResults(toolResults);
 
       orchestratorLogger.info({
@@ -337,6 +352,21 @@ export async function runSequentialWorkflow(params: {
         toolCallCount: toolCallLog.length,
         tools: toolCallLog.map(tc => tc.toolName),
       }, `✅ Executed ${toolCallLog.length} tool calls`);
+
+      // Send dashboard events for MCP tool invocations
+      if (dashboard) {
+        for (const toolCall of toolCallLog) {
+          dashboard.sendEvent({
+            type: 'tool_invocation',
+            timestamp: Date.now(),
+            data: {
+              toolName: toolCall.toolName,
+              agentId: agent.id,
+              type: 'MCP'
+            }
+          });
+        }
+      }
     } else {
       // Use standard LLM provider for agents without MCP tools
       output = await llm.generate({

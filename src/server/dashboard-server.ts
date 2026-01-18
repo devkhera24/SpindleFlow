@@ -5,7 +5,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 
 export interface ExecutionEvent {
-  type: 'workflow_start' | 'workflow_end' | 'agent_start' | 'agent_complete' | 'agent_progress' | 'memory_query' | 'memory_store' | 'error' | 'log';
+  type: 'workflow_start' | 'workflow_end' | 'agent_start' | 'agent_complete' | 'agent_progress' | 'memory_query' | 'memory_store' | 'error' | 'log' | 'tool_invocation';
   timestamp: number;
   data: any;
 }

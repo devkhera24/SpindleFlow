@@ -114,6 +114,13 @@
             display: grid;
             grid-template-columns: 1fr 350px;
             gap: 20px;
+            margin-bottom: 20px;
+        }
+
+        .stats-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
         }
 
         .execution-log {
@@ -239,6 +246,70 @@
 
         .agent-card.completed {
             opacity: 0.7;
+        }
+
+        .history-item {
+            background: #f9fafb;
+            border-radius: 8px;
+            padding: 12px;
+            margin-bottom: 10px;
+            border-left: 3px solid #667eea;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .history-item-info {
+            flex: 1;
+        }
+
+        .history-item-name {
+            font-weight: 600;
+            color: #1f2937;
+            font-size: 14px;
+            margin-bottom: 4px;
+        }
+
+        .history-item-meta {
+            font-size: 12px;
+            color: #6b7280;
+        }
+
+        .history-item-duration {
+            font-weight: 600;
+            color: #667eea;
+            font-size: 14px;
+        }
+
+        .tool-item {
+            background: #f0fdf4;
+            border-radius: 8px;
+            padding: 12px;
+            margin-bottom: 10px;
+            border-left: 3px solid #10b981;
+        }
+
+        .tool-name {
+            font-weight: 600;
+            color: #1f2937;
+            font-size: 14px;
+            margin-bottom: 4px;
+        }
+
+        .tool-meta {
+            font-size: 12px;
+            color: #6b7280;
+        }
+
+        .tool-count {
+            display: inline-block;
+            background: #10b981;
+            color: white;
+            padding: 2px 8px;
+            border-radius: 10px;
+            font-size: 11px;
+            font-weight: 600;
+            margin-left: 8px;
         }
 
         .agent-name {
@@ -371,6 +442,26 @@
                 </div>
             </div>
         </div>
+
+        <div class="stats-grid">
+            <div class="agents-panel">
+                <h2>📊 Agents Used History</h2>
+                <div id="agentHistoryContainer">
+                    <div class="empty-state">
+                        <p>No agents executed yet</p>
+                    </div>
+                </div>
+            </div>
+
+            <div class="agents-panel">
+                <h2>🔧 MCP Tools Used</h2>
+                <div id="toolsContainer">
+                    <div class="empty-state">
+                        <p>No tools invoked yet</p>
+                    </div>
+                </div>
+            </div>
+        </div>
     </div>
 
     <script>
@@ -382,6 +473,8 @@
             activeWorkflows: 0
         };
         let activeAgents = new Map();
+        let agentHistory = [];
+        let toolsUsed = new Map(); // toolName -> { count, lastUsed, agent }
 
         function connect() {
             const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
@@ -438,7 +531,19 @@
                     if (agent) {
                         agent.progress = 100;
                         agent.completed = true;
+                        agent.duration = event.data.duration;
+                        
+                        // Add to history
+                        agentHistory.push({
+                            agentId: event.data.agentId,
+                            role: agent.role,
+                            duration: event.data.duration,
+                            outputLength: event.data.outputLength,
+                            timestamp: event.timestamp
+                        });
+                        
                         updateAgentsPanel();
+                        updateAgentHistory();
                     }
                     addTimelineEvent(event, 'agent', `Agent Completed: ${event.data.agentId}`, 
                         `Duration: ${(event.data.duration / 1000).toFixed(2)}s | Output: ${formatBytes(event.data.outputLength)}`);
@@ -467,6 +572,25 @@
                 case 'error':
                     addTimelineEvent(event, 'error', `Error: ${event.data.agentId}`, 
                         event.data.error);
+                    break;
+                case 'tool_invocation':
+                    const toolName = event.data.toolName;
+                    if (!toolsUsed.has(toolName)) {
+                        toolsUsed.set(toolName, {
+                            count: 0,
+                            lastUsed: event.timestamp,
+                            agent: event.data.agentId,
+                            type: event.data.type || 'unknown'
+                        });
+                    }
+                    const toolData = toolsUsed.get(toolName);
+                    toolData.count++;
+                    toolData.lastUsed = event.timestamp;
+                    toolData.agent = event.data.agentId;
+                    
+                    updateToolsPanel();
+                    addTimelineEvent(event, 'log', `Tool Invoked: ${toolName}`, 
+                        `Agent: ${event.data.agentId} | Type: ${event.data.type || 'MCP'}`);
                     break;
                 case 'log':
                     addTimelineEvent(event, 'log', 'System Log', event.data.message);
@@ -527,6 +651,66 @@
             });
         }
 
+        function updateAgentHistory() {
+            const container = document.getElementById('agentHistoryContainer');
+            if (agentHistory.length === 0) {
+                container.innerHTML = '<div class="empty-state"><p>No agents executed yet</p></div>';
+                return;
+            }
+
+            // Sort by timestamp (most recent first)
+            const sortedHistory = [...agentHistory].sort((a, b) => b.timestamp - a.timestamp);
+            
+            container.innerHTML = '';
+            sortedHistory.slice(0, 10).forEach(item => {
+                const historyItem = document.createElement('div');
+                historyItem.className = 'history-item';
+                historyItem.innerHTML = `
+                    <div class="history-item-info">
+                        <div class="history-item-name">${item.role}</div>
+                        <div class="history-item-meta">
+                            ${new Date(item.timestamp).toLocaleTimeString()} • 
+                            Output: ${formatBytes(item.outputLength)}
+                        </div>
+                    </div>
+                    <div class="history-item-duration">
+                        ${(item.duration / 1000).toFixed(2)}s
+                    </div>
+                `;
+                container.appendChild(historyItem);
+            });
+        }
+
+        function updateToolsPanel() {
+            const container = document.getElementById('toolsContainer');
+            if (toolsUsed.size === 0) {
+                container.innerHTML = '<div class="empty-state"><p>No tools invoked yet</p></div>';
+                return;
+            }
+
+            // Convert to array and sort by count (most used first)
+            const sortedTools = Array.from(toolsUsed.entries())
+                .sort((a, b) => b[1].count - a[1].count);
+            
+            container.innerHTML = '';
+            sortedTools.forEach(([toolName, data]) => {
+                const toolItem = document.createElement('div');
+                toolItem.className = 'tool-item';
+                toolItem.innerHTML = `
+                    <div class="tool-name">
+                        🔧 ${toolName}
+                        <span class="tool-count">${data.count}x</span>
+                    </div>
+                    <div class="tool-meta">
+                        Last used: ${new Date(data.lastUsed).toLocaleTimeString()} • 
+                        By: ${data.agent} • 
+                        Type: ${data.type}
+                    </div>
+                `;
+                container.appendChild(toolItem);
+            });
+        }
+
         function formatBytes(bytes) {
             if (bytes < 1024) return bytes + 'B';
             if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(2) + 'KB';
@@ -538,7 +722,11 @@
                 .then(() => {
                     document.getElementById('timeline').innerHTML = '<div class="empty-state"><p>History cleared</p></div>';
                     stats = { workflows: 0, agents: 0, memoryQueries: 0, activeWorkflows: 0 };
+                    agentHistory = [];
+                    toolsUsed.clear();
                     updateStats();
+                    updateAgentHistory();
+                    updateToolsPanel();
                 });
         }
 
